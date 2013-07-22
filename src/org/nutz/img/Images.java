@@ -34,6 +34,7 @@ import javax.imageio.stream.ImageOutputStream;
 
 import org.nutz.lang.Files;
 import org.nutz.lang.Lang;
+import org.nutz.repo.gif.AnimatedGifEncoder;
 
 /**
  * 对图像操作的简化 API
@@ -353,6 +354,70 @@ public class Images {
     }
 
     /**
+     * 根据给定的起始坐标点与结束坐标点来剪切一个图片，令其符合给定的尺寸，并将其保存成目标图像文件
+     * <p>
+     * 图片格式支持 png | gif | jpg | bmp | wbmp
+     * 
+     * @param srcIm
+     *            源图像文件对象
+     * @param taIm
+     *            目标图像文件对象
+     * @param startPoint
+     *            起始坐标点，其值[x, y]为相对原图片左上角的坐标
+     * @param endPoint
+     *            结束坐标点，其值[x, y]为相对原图片左上角的坐标
+     * @return 被转换前的图像对象
+     * 
+     * @throws IOException
+     *             当读写文件失败时抛出
+     */
+    public static BufferedImage clipScale(Object srcIm, File taIm, int[] startPoint, int[] endPoint)
+            throws IOException {
+        // 计算给定坐标后的图片的尺寸
+        int width = endPoint[0] - startPoint[0];
+        int height = endPoint[1] - startPoint[1];
+
+        BufferedImage old = read(srcIm);
+        BufferedImage im = Images.clipScale(old.getSubimage(startPoint[0],
+                                                            startPoint[1],
+                                                            width,
+                                                            height), width, height);
+
+        write(im, taIm);
+        return old;
+    }
+
+    /**
+     * 根据给定的起始坐标点与结束坐标点来剪切一个图片，令其符合给定的尺寸，并将其保存成目标图像文件
+     * <p>
+     * 图片格式支持 png | gif | jpg | bmp | wbmp
+     * 
+     * @param srcIm
+     *            源图像文件对象
+     * @param taIm
+     *            目标图像文件对象
+     * @param startPoint
+     *            起始坐标点，其值[x, y]为相对原图片左上角的坐标
+     * @param endPoint
+     *            结束坐标点，其值[x, y]为相对原图片左上角的坐标
+     * @return 被转换前的图像对象
+     * 
+     * @throws IOException
+     *             当读写文件失败时抛出
+     */
+    public static BufferedImage clipScale(String srcPath,
+                                          String taPath,
+                                          int[] startPoint,
+                                          int[] endPoint) throws IOException {
+        File srcIm = Files.findFile(srcPath);
+        if (null == srcIm)
+            throw Lang.makeThrow("Fail to find image file '%s'!", srcPath);
+
+        File taIm = Files.createFileIfNoExists(taPath);
+        return clipScale(srcIm, taIm, startPoint, endPoint);
+    }
+
+    /**
      * 自动缩放剪切一个图片，令其符合给定的尺寸
      * <p>
      * 如果图片太大，则将其缩小，如果图片太小，则将其放大，多余的部分被裁减
@@ -419,31 +484,33 @@ public class Images {
                 img = ((URL) img).openStream();
             if (img instanceof InputStream) {
                 File tmp = File.createTempFile("nutz_img", ".jpg");
-                Files.write(tmp, (InputStream)img);
+                Files.write(tmp, (InputStream) img);
                 try {
-					return read(tmp);
-				} finally {
-					tmp.delete();
-				}
+                    return read(tmp);
+                }
+                finally {
+                    tmp.delete();
+                }
             }
             throw Lang.makeThrow("Unkown img info!! --> " + img);
         }
         catch (IOException e) {
             try {
-                    InputStream in = null;
-                    if (img instanceof File)
-                        in = new FileInputStream((File)img);
-                    else if (img instanceof URL)
-                        in = ((URL)img).openStream();
-                    else if (img instanceof InputStream)
-                        in = (InputStream)img;
-                    if (in != null)
-                        return readJpeg(in);
-            } catch (IOException e2) {
+                InputStream in = null;
+                if (img instanceof File)
+                    in = new FileInputStream((File) img);
+                else if (img instanceof URL)
+                    in = ((URL) img).openStream();
+                else if (img instanceof InputStream)
+                    in = (InputStream) img;
+                if (in != null)
+                    return readJpeg(in);
+            }
+            catch (IOException e2) {
                 e2.fillInStackTrace();
             }
             return null;
-            //throw Lang.wrapThrow(e);
+            // throw Lang.wrapThrow(e);
         }
     }
 
@@ -492,22 +559,24 @@ public class Images {
     /**
      * 尝试读取JPEG文件的高级方法,可读取32位的jpeg文件
      * <p/>
-     * 来自: http://stackoverflow.com/questions/2408613/problem-reading-jpeg-image-using-imageio-readfile-file
+     * 来自:
+     * http://stackoverflow.com/questions/2408613/problem-reading-jpeg-image-
+     * using-imageio-readfile-file
      * 
      * */
     private static BufferedImage readJpeg(InputStream in) throws IOException {
         Iterator<ImageReader> readers = ImageIO.getImageReadersByFormatName("JPEG");
         ImageReader reader = null;
-        while(readers.hasNext()) {
-            reader = (ImageReader)readers.next();
-            if(reader.canReadRaster()) {
+        while (readers.hasNext()) {
+            reader = (ImageReader) readers.next();
+            if (reader.canReadRaster()) {
                 break;
             }
         }
         ImageInputStream input = ImageIO.createImageInputStream(in);
         reader.setInput(input);
-        //Read the image raster
-        Raster raster = reader.readRaster(0, null); 
+        // Read the image raster
+        Raster raster = reader.readRaster(0, null);
         BufferedImage image = createJPEG4(raster);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         writeJpeg(image, out, 1);
@@ -515,49 +584,80 @@ public class Images {
         BufferedImage img = read(new ByteArrayInputStream(out.toByteArray()));
         return img;
     }
-    
-  /**                                                                                                                                           
-    Java's ImageIO can't process 4-component images                                                                                             
-    and Java2D can't apply AffineTransformOp either,                                                                                            
-    so convert raster data to RGB.                                                                                                              
-    Technique due to MArk Stephens.                                                                                                             
-    Free for any use.                                                                                                                           
-  */
+
+    /**
+     * Java's ImageIO can't process 4-component images and Java2D can't apply
+     * AffineTransformOp either, so convert raster data to RGB. Technique due to
+     * MArk Stephens. Free for any use.
+     */
     private static BufferedImage createJPEG4(Raster raster) {
         int w = raster.getWidth();
         int h = raster.getHeight();
         byte[] rgb = new byte[w * h * 3];
-      
+
         float[] Y = raster.getSamples(0, 0, w, h, 0, (float[]) null);
         float[] Cb = raster.getSamples(0, 0, w, h, 1, (float[]) null);
         float[] Cr = raster.getSamples(0, 0, w, h, 2, (float[]) null);
         float[] K = raster.getSamples(0, 0, w, h, 3, (float[]) null);
 
         for (int i = 0, imax = Y.length, base = 0; i < imax; i++, base += 3) {
-            float k = 220 - K[i], y = 255 - Y[i], cb = 255 - Cb[i],
-                    cr = 255 - Cr[i];
+            float k = 220 - K[i], y = 255 - Y[i], cb = 255 - Cb[i], cr = 255 - Cr[i];
 
             double val = y + 1.402 * (cr - 128) - k;
             val = (val - 128) * .65f + 128;
-            rgb[base] = val < 0.0 ? (byte) 0 : val > 255.0 ? (byte) 0xff
-                    : (byte) (val + 0.5);
+            rgb[base] = val < 0.0 ? (byte) 0 : val > 255.0 ? (byte) 0xff : (byte) (val + 0.5);
 
             val = y - 0.34414 * (cb - 128) - 0.71414 * (cr - 128) - k;
             val = (val - 128) * .65f + 128;
-            rgb[base + 1] = val < 0.0 ? (byte) 0 : val > 255.0 ? (byte) 0xff
-                    : (byte) (val + 0.5);
+            rgb[base + 1] = val < 0.0 ? (byte) 0 : val > 255.0 ? (byte) 0xff : (byte) (val + 0.5);
 
             val = y + 1.772 * (cb - 128) - k;
             val = (val - 128) * .65f + 128;
-            rgb[base + 2] = val < 0.0 ? (byte) 0 : val > 255.0 ? (byte) 0xff
-                    : (byte) (val + 0.5);
+            rgb[base + 2] = val < 0.0 ? (byte) 0 : val > 255.0 ? (byte) 0xff : (byte) (val + 0.5);
         }
 
-
-        raster = Raster.createInterleavedRaster(new DataBufferByte(rgb, rgb.length), w, h, w * 3, 3, new int[]{0, 1, 2}, null);
+        raster = Raster.createInterleavedRaster(new DataBufferByte(rgb, rgb.length),
+                                                w,
+                                                h,
+                                                w * 3,
+                                                3,
+                                                new int[]{0, 1, 2},
+                                                null);
 
         ColorSpace cs = ColorSpace.getInstance(ColorSpace.CS_sRGB);
-        ColorModel cm = new ComponentColorModel(cs, false, true, Transparency.OPAQUE, DataBuffer.TYPE_BYTE);
+        ColorModel cm = new ComponentColorModel(cs,
+                                                false,
+                                                true,
+                                                Transparency.OPAQUE,
+                                                DataBuffer.TYPE_BYTE);
         return new BufferedImage(cm, (WritableRaster) raster, true, null);
     }
+
+    /**
+     * 根据一堆图片生成一个gif图片
+     * 
+     * @param targetFile
+     *            目标输出文件
+     * @param frameFiles
+     *            组成动画的文件
+     * @param delay
+     *            帧间隔
+     * @return 是否生成成功
+     */
+    public static boolean writeGif(String targetFile, String[] frameFiles, int delay) {
+        try {
+            AnimatedGifEncoder e = new AnimatedGifEncoder();
+            e.setRepeat(0);
+            e.start(targetFile);
+            for (String f : frameFiles) {
+                e.setDelay(delay);
+                e.addFrame(ImageIO.read(new File(f)));
+            }
+            return e.finish();
+        }
+        catch (Exception e) {
+            return false;
+        }
+    }
+
 }

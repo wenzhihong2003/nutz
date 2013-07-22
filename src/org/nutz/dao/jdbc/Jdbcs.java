@@ -1,11 +1,13 @@
 package org.nutz.dao.jdbc;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
@@ -24,6 +26,7 @@ import java.util.Calendar;
 import javax.sql.DataSource;
 
 import org.nutz.castor.Castors;
+import org.nutz.dao.DaoException;
 import org.nutz.dao.entity.annotation.ColType;
 import org.nutz.dao.impl.entity.field.NutMappingField;
 import org.nutz.dao.impl.jdbc.BlobValueAdaptor;
@@ -677,38 +680,49 @@ public abstract class Jdbcs {
         public static final ValueAdaptor asBinaryStream = new ValueAdaptor() {
 
             public Object get(ResultSet rs, String colName) throws SQLException {
-                return rs.getBinaryStream(colName);
+            	InputStream in = rs.getBinaryStream(colName);
+            	if (in == null) {
+            		return in;
+            	}
+            	try {
+					File f = File.createTempFile("nutzdao_blob", ".tmp");
+					Files.write(f, in);
+					in.close();
+					return new ReadOnceInputStream(f);
+				}
+				catch (IOException e) {
+					throw Lang.wrapThrow(e);
+				}
             }
 
             public void set(PreparedStatement stat, Object obj, int index) throws SQLException {
                 if (null == obj) {
                     stat.setNull(index, Types.BINARY);
                 } else {
-                    if (obj instanceof InputStream) {
+                	
+                	if (obj instanceof ByteArrayInputStream) {
+                		stat.setBinaryStream(index, (InputStream)obj, ((ByteArrayInputStream)obj).available());
+                	} else if (obj instanceof InputStream) {
+                		if (obj instanceof ReadOnceInputStream) {
+                			if (((ReadOnceInputStream)obj).readed) {
+                				throw new DaoException("");
+                			}
+                		}
                         try {
                             File f = Jdbcs.getFilePool().createFile(".dat");
-                            FileOutputStream fos = new FileOutputStream(f);
-                            InputStream in = (InputStream) obj;
-                            int size = 0;
-                            byte[] cbuf = new byte[8192];
-                            while (true) {
-                                int len = in.read(cbuf);
-                                if (len == -1)
-                                    break;
-                                if (len == 0)
-                                    continue;
-                                size += len;
-                                fos.write(cbuf, 0, len);
-                            }
-                            fos.flush();
-                            fos.close();
-                            stat.setBinaryStream(index, new FileInputStream(f), size);
+                            Streams.writeAndClose(new FileOutputStream(f), (InputStream)obj);
+                            stat.setBinaryStream(index, new FileInputStream(f), f.length());
                         }
                         catch (FileNotFoundException e) {
-                            throw Lang.impossible();
-                        }
-                        catch (IOException e) {
-                            throw Lang.wrapThrow(e);
+                        	System.gc();
+                        	try {
+                                File f = Jdbcs.getFilePool().createFile(".dat");
+                                Streams.writeAndClose(new FileOutputStream(f), (InputStream)obj);
+                                stat.setBinaryStream(index, new FileInputStream(f), f.length());
+                            }
+                            catch (FileNotFoundException e2) {
+                            	throw Lang.impossible();
+                            }
                         }
                     }
                 }
@@ -840,22 +854,8 @@ public abstract class Jdbcs {
     public static void setCharacterStream(int index, Object obj, PreparedStatement stat) throws SQLException {
         try {
             File f = Jdbcs.getFilePool().createFile(".dat");
-            FileWriter fw = new FileWriter(f);
-            Reader reader = (Reader) obj;
-            int size = 0;
-            char[] cbuf = new char[8192];
-            while (reader.ready()) {
-                int len = reader.read(cbuf);
-                if (len == -1)
-                    break;
-                if (len == 0)
-                    continue;
-                size += len;
-                fw.write(cbuf, 0, len);
-            }
-            fw.flush();
-            fw.close();
-            stat.setCharacterStream(index, new FileReader(f), size);
+            Streams.writeAndClose(new FileWriter(f), (Reader)obj);
+            stat.setCharacterStream(index, new FileReader(f), f.length());
         }
         catch (FileNotFoundException e) {
             throw Lang.impossible();
@@ -864,4 +864,42 @@ public abstract class Jdbcs {
             throw Lang.wrapThrow(e);
         }
     }
+}
+
+class ReadOnceInputStream extends FilterInputStream {
+	
+	private File f;
+	
+	public boolean readed;
+
+	protected ReadOnceInputStream(File f) throws FileNotFoundException {
+		super(new FileInputStream(f));
+		this.f = f;
+	}
+	
+	public int read() throws IOException {
+		readed = true;
+		return super.read();
+	}
+	
+	public int read(byte[] b) throws IOException {
+		readed = true;
+		return super.read(b);
+	}
+	
+	public int read(byte[] b, int off, int len) throws IOException {
+		readed = true;
+		return super.read(b, off, len);
+	}
+	
+	public void close() throws IOException {
+		super.close();
+		f.delete();
+	}
+	
+	protected void finalize() throws Throwable {
+		f.delete();
+		super.finalize();
+	}
+	
 }
